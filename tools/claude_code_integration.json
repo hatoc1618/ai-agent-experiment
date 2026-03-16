@@ -1,0 +1,319 @@
+{
+  "slash_commands": [
+    {
+      "name": "obsidian-extract",
+      "description": "Extract knowledge cards from Claude Code logs using [EXTRACT_AS_KNOWLEDGE] markers",
+      "aliases": ["obsidian", "extract-knowledge", "ek"],
+      "usage": "/obsidian-extract [extract|export|search|review|mark] [options]",
+      "examples": [
+        {
+          "command": "/obsidian-extract extract --text 'captured log content'",
+          "description": "Extract knowledge cards from text containing [EXTRACT_AS_KNOWLEDGE] markers"
+        },
+        {
+          "command": "/obsidian-extract export ~/Obsidian/MyVault",
+          "description": "Export all knowledge cards to Obsidian vault"
+        },
+        {
+          "command": "/obsidian-extract search 'Python optimization'",
+          "description": "Search knowledge cards by keyword"
+        },
+        {
+          "command": "/obsidian-extract review",
+          "description": "Run monthly quality review check (60 min recommended)"
+        },
+        {
+          "command": "/obsidian-extract mark abc123 --approved --notes 'Verified'",
+          "description": "Mark a knowledge card as reviewed"
+        }
+      ],
+      "hook": {
+        "script": "python3 $PROJECT_ROOT/tools/obsidian_extract.py",
+        "env": {
+          "OBSIDIAN_VAULT": "${HOME}/Obsidian",
+          "KNOWLEDGE_DB": "${HOME}/scripts/LLMLogger/knowledge.db"
+        }
+      },
+      "subcommands": [
+        {
+          "name": "extract",
+          "description": "Extract knowledge cards from text or log file",
+          "options": [
+            {
+              "flag": "--log-file, -f",
+              "description": "Path to Claude Code log file"
+            },
+            {
+              "flag": "--text, -t",
+              "description": "Direct text input (alternative to log file)"
+            },
+            {
+              "flag": "--source, -s",
+              "description": "Source identifier (default: claude-code-log)"
+            }
+          ]
+        },
+        {
+          "name": "export",
+          "description": "Export knowledge cards to Obsidian vault",
+          "arguments": [
+            {
+              "name": "vault_path",
+              "description": "Path to Obsidian vault root directory"
+            }
+          ],
+          "options": [
+            {
+              "flag": "--reviewed-only",
+              "description": "Export only reviewed/approved cards"
+            }
+          ]
+        },
+        {
+          "name": "search",
+          "description": "Full-text search knowledge cards (FTS5)",
+          "arguments": [
+            {
+              "name": "query",
+              "description": "Search query (supports FTS5 syntax)"
+            }
+          ],
+          "options": [
+            {
+              "flag": "--limit, -l",
+              "description": "Maximum results (default: 10)"
+            }
+          ]
+        },
+        {
+          "name": "review",
+          "description": "Run monthly quality review check",
+          "explanation": "Checks for accumulated unreviewed cards and flags for manual review if count exceeds threshold"
+        },
+        {
+          "name": "mark",
+          "description": "Mark knowledge card as reviewed",
+          "arguments": [
+            {
+              "name": "card_id",
+              "description": "Card ID to mark as reviewed"
+            }
+          ],
+          "options": [
+            {
+              "flag": "--approved",
+              "description": "Mark as approved/confirmed"
+            },
+            {
+              "flag": "--rejected",
+              "description": "Mark as rejected/removed"
+            },
+            {
+              "flag": "--notes, -n",
+              "description": "Add review notes or comments"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "workflow_integration": {
+    "on_save": {
+      "description": "Automatically scan Claude Code logs for markers on save",
+      "enabled": false,
+      "trigger": "file_save",
+      "actions": [
+        {
+          "condition": "claude_code_output_detected",
+          "action": "scan_for_markers",
+          "command": "/obsidian-extract extract --log-file ${CLAUDE_CODE_LOG_PATH}"
+        }
+      ]
+    },
+    "scheduled_tasks": [
+      {
+        "name": "monthly_review",
+        "schedule": "0 0 1 * *",
+        "description": "Monthly knowledge card quality review",
+        "command": "/obsidian-extract review",
+        "alert_condition": "unreviewed_count > 15"
+      },
+      {
+        "name": "weekly_export",
+        "schedule": "0 0 * * 0",
+        "description": "Weekly export to Obsidian vault",
+        "command": "/obsidian-extract export ${OBSIDIAN_VAULT} --reviewed-only"
+      }
+    ]
+  },
+  "memory_integration": {
+    "description": "Store extraction preferences and vault configuration in Claude Code memory",
+    "memory_keys": [
+      {
+        "key": "obsidian_vault_path",
+        "type": "string",
+        "description": "Path to Obsidian vault (e.g., ~/Obsidian/MyVault)"
+      },
+      {
+        "key": "auto_extract_enabled",
+        "type": "boolean",
+        "description": "Enable automatic extraction on Claude Code output"
+      },
+      {
+        "key": "monthly_review_reminder",
+        "type": "date",
+        "description": "Last monthly review date for reminder scheduling"
+      },
+      {
+        "key": "extraction_preferences",
+        "type": "object",
+        "description": "User preferences for extraction (tags, filters, etc.)"
+      }
+    ]
+  },
+  "database_configuration": {
+    "type": "sqlite3",
+    "location": "${HOME}/scripts/LLMLogger/knowledge.db",
+    "tables": [
+      {
+        "name": "knowledge_cards",
+        "schema": {
+          "id": "TEXT PRIMARY KEY",
+          "title": "TEXT NOT NULL",
+          "content": "TEXT NOT NULL",
+          "source_log": "TEXT",
+          "extracted_at": "TEXT",
+          "tags": "TEXT (JSON array)",
+          "reviewed": "INTEGER (0/1)",
+          "review_notes": "TEXT",
+          "obsidian_node_id": "TEXT"
+        }
+      },
+      {
+        "name": "knowledge_fts",
+        "type": "FTS5 virtual table",
+        "columns": ["title", "content", "tags"],
+        "description": "Full-text search index for knowledge cards"
+      }
+    ]
+  },
+  "obsidian_graph_integration": {
+    "description": "Visual distinction between auto-extracted and human-created notes in Obsidian",
+    "node_types": {
+      "auto-extracted": {
+        "prefix": "auto-",
+        "color": "green",
+        "description": "Knowledge card auto-extracted from Claude Code logs"
+      },
+      "human-created": {
+        "prefix": "human-",
+        "color": "blue",
+        "description": "Knowledge card created or reviewed by human"
+      }
+    },
+    "metadata_fields": {
+      "node_type": "Visual distinction for graph coloring",
+      "node_id": "Unique identifier for graph tracking",
+      "source": "Original source (Claude Code log, session, etc.)",
+      "extracted_at": "Timestamp of extraction",
+      "reviewed": "Approval status (affects graph color)",
+      "tags": "Content tags for categorization"
+    }
+  },
+  "quality_checks": {
+    "extraction_validation": [
+      {
+        "rule": "minimum_content_length",
+        "threshold": 50,
+        "action": "skip",
+        "message": "Content too short to be meaningful"
+      },
+      {
+        "rule": "duplicate_detection",
+        "method": "sha256_hash",
+        "action": "skip",
+        "message": "Duplicate card already exists"
+      },
+      {
+        "rule": "tag_validation",
+        "pattern": "^#\\w+$",
+        "action": "extract",
+        "message": "Valid hashtag format"
+      }
+    ],
+    "monthly_review_checks": [
+      {
+        "check": "unreviewed_accumulation",
+        "threshold": 15,
+        "action": "alert",
+        "message": "15+ unreviewed cards - monthly review recommended"
+      },
+      {
+        "check": "quality_degradation",
+        "metric": "review_approval_rate",
+        "threshold": 0.7,
+        "action": "warn",
+        "message": "Review approval rate < 70% - extraction rules need adjustment"
+      },
+      {
+        "check": "storage_growth",
+        "metric": "cards_per_day",
+        "threshold": 5,
+        "action": "monitor",
+        "message": "High accumulation rate - check for noise"
+      }
+    ]
+  },
+  "claude_code_hooks": {
+    "description": "Integration with Claude Code terminal output hooks",
+    "on_command_complete": {
+      "description": "Trigger after Claude Code command completes",
+      "hook_name": "claude_code_post_output",
+      "action": "scan_for_markers",
+      "condition": "[EXTRACT_AS_KNOWLEDGE] detected in output"
+    },
+    "on_session_end": {
+      "description": "Trigger when Claude Code session ends",
+      "hook_name": "claude_code_session_end",
+      "action": "prompt_for_export",
+      "message": "Export captured knowledge cards to Obsidian? (Y/n)"
+    }
+  },
+  "implementation_phases": {
+    "phase_1_mvp": {
+      "duration": "2-3 weeks",
+      "features": [
+        "Basic [EXTRACT_AS_KNOWLEDGE] marker detection",
+        "SQLite storage with FTS5 indexing",
+        "Simple Obsidian markdown export",
+        "Manual quality review workflow"
+      ],
+      "deliverables": [
+        "obsidian_extract.py with core functionality",
+        "Knowledge database schema",
+        "Obsidian vault export template"
+      ]
+    },
+    "phase_2_measurement": {
+      "duration": "3 months",
+      "metrics": [
+        "Knowledge card count (target: 10-20/week)",
+        "Reuse frequency (target: 5+ per card/month)",
+        "Review approval rate (target: 70%+)",
+        "Graph utility (target: 50+ connections)"
+      ],
+      "decision_criteria": "ROI > 0"
+    },
+    "phase_3_full_version": {
+      "condition": "Phase 2 ROI > 0",
+      "duration": "4-6 weeks",
+      "enhancements": [
+        "Visual Obsidian graph coloring (auto vs human)",
+        "Automated weekly/monthly export scheduling",
+        "Claude Code terminal hook integration",
+        "Advanced search with relevance ranking",
+        "Knowledge card relationships and cross-linking"
+      ]
+    }
+  }
+}
